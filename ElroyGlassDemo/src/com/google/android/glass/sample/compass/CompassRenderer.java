@@ -132,7 +132,6 @@ public class CompassRenderer implements SurfaceHolder.Callback {
     public void surfaceCreated(SurfaceHolder holder) {
         mHolder = holder;
 
-        mOrientationManager.addOnChangedListener(mCompassListener);
         mOrientationManager.start();
 
         if (mOrientationManager.hasLocation()) {
@@ -149,8 +148,6 @@ public class CompassRenderer implements SurfaceHolder.Callback {
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         mRenderThread.quit();
-
-        mOrientationManager.removeOnChangedListener(mCompassListener);
         mOrientationManager.stop();
     }
 

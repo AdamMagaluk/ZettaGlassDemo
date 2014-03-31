@@ -101,6 +101,7 @@ public class CompassService extends Service {
 
         SensorManager sensorManager =
                 (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        
         LocationManager locationManager =
                 (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 

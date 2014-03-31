@@ -66,9 +66,7 @@ public class OrientationManager {
      */
     private static final int ARM_DISPLACEMENT_DEGREES = 6;
     
-    private UDPDump m_udpDump = new UDPDump();
     
-
     /**
      * Classes should implement this interface if they want to be notified of changes in the user's
      * location, orientation, or the accuracy of the compass.
@@ -99,14 +97,13 @@ public class OrientationManager {
     private final SensorManager mSensorManager;
     private final LocationManager mLocationManager;
     private final String mLocationProvider;
-    private final Set<OnChangedListener> mListeners;
     private final float[] mRotationMatrix;
     private final float[] mOrientation;
 
     private boolean mTracking;
-    private float mHeading;
-    private float mPitch;
-    private Location mLocation;
+    
+    private UDPDump m_udpDump = new UDPDump();
+    
     private GeomagneticField mGeomagneticField;
     private boolean mHasInterference;
 
@@ -114,17 +111,14 @@ public class OrientationManager {
      * The sensor listener used by the orientation manager.
      */
     private SensorEventListener mSensorListener = new SensorEventListener() {
-
+    	
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
-            if (sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
-                mHasInterference = (accuracy < SensorManager.SENSOR_STATUS_ACCURACY_HIGH);
-                notifyAccuracyChanged();
-            }
         }
 
         @Override
         public void onSensorChanged(SensorEvent event) {
+        	
             if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
                 // Get the current heading from the sensor, then notify the listeners of the
                 // change.
@@ -135,19 +129,33 @@ public class OrientationManager {
 
                 // Store the pitch (used to display a message indicating that the user's head
                 // angle is too steep to produce reliable results.
-                mPitch = (float) Math.toDegrees(mOrientation[1]);
-                
-                //Log.d("sensors", "Pitch: "+mPitch);
-                m_udpDump.send();
+                m_udpDump.Pitch = (float) Math.toDegrees(mOrientation[1]);
                 
                 // Convert the heading (which is relative to magnetic north) to one that is
                 // relative to true north, using the user's current location to compute this.
                 float magneticHeading = (float) Math.toDegrees(mOrientation[0]);
-                mHeading = MathUtils.mod(computeTrueNorth(magneticHeading), 360.0f)
+                m_udpDump.Heading = MathUtils.mod(computeTrueNorth(magneticHeading), 360.0f)
                         - ARM_DISPLACEMENT_DEGREES;
 
-                notifyOrientationChanged();
             }
+           
+            if(event.sensor.getType() == Sensor.TYPE_LIGHT){
+            	m_udpDump.LightLevel = event.values[0];
+            }
+            
+            if(event.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
+            	m_udpDump.LinearAcceleration[0] = event.values[0] - m_udpDump.Gravity[0];
+            	m_udpDump.LinearAcceleration[1] = event.values[1] - m_udpDump.Gravity[1];
+            	m_udpDump.LinearAcceleration[2] = event.values[2] - m_udpDump.Gravity[2];
+            }
+            
+            if(event.sensor.getType() == Sensor.TYPE_GRAVITY){
+            	m_udpDump.Gravity[0] = event.values[0];
+            	m_udpDump.Gravity[1] = event.values[1];
+            	m_udpDump.Gravity[2] = event.values[2];
+            }
+            
+            update();
         }
     };
 
@@ -157,9 +165,8 @@ public class OrientationManager {
     private LocationListener mLocationListener = new LocationListener() {
         @Override
         public void onLocationChanged(Location location) {
-            mLocation = location;
+        	m_udpDump.Location = location;
             updateGeomagneticField();
-            notifyLocationChanged();
         }
 
         @Override
@@ -187,7 +194,6 @@ public class OrientationManager {
         mOrientation = new float[9];
         mSensorManager = sensorManager;
         mLocationManager = locationManager;
-        mListeners = new LinkedHashSet<OnChangedListener>();
 
         Criteria criteria = new Criteria();
         criteria.setAccuracy(Criteria.ACCURACY_FINE);
@@ -198,42 +204,34 @@ public class OrientationManager {
     }
 
     /**
-     * Adds a listener that will be notified when the user's location or orientation changes.
-     */
-    public void addOnChangedListener(OnChangedListener listener) {
-        mListeners.add(listener);
-    }
-
-    /**
-     * Removes a listener from the list of those that will be notified when the user's location or
-     * orientation changes.
-     */
-    public void removeOnChangedListener(OnChangedListener listener) {
-        mListeners.remove(listener);
-    }
-
-    /**
      * Starts tracking the user's location and orientation. After calling this method, any
      * {@link OnChangedListener}s added to this object will be notified of these events.
      */
     public void start() {
         if (!mTracking) {
-            mSensorManager.registerListener(mSensorListener,
-                    mSensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR),
-                    SensorManager.SENSOR_DELAY_UI);
-
-            // The rotation vector sensor doesn't give us accuracy updates, so we observe the
-            // magnetic field sensor solely for those.
-            mSensorManager.registerListener(mSensorListener,
-                    mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
-                    SensorManager.SENSOR_DELAY_UI);
-
+        		
+        	int sensors[] = {Sensor.TYPE_ROTATION_VECTOR,
+        					 Sensor.TYPE_GRAVITY,
+        					 Sensor.TYPE_ACCELEROMETER,
+        					 Sensor.TYPE_GRAVITY,
+        					 Sensor.TYPE_LIGHT,
+        					 Sensor.TYPE_LINEAR_ACCELERATION,
+        					 Sensor.TYPE_MAGNETIC_FIELD
+        					};
+        	
+        	for(int i=0;i<sensors.length;i++){
+        		mSensorManager.registerListener(mSensorListener,
+                        mSensorManager.getDefaultSensor(sensors[i]),
+                        SensorManager.SENSOR_DELAY_UI);
+        	}
+        	
+            
             Location lastLocation = mLocationManager
                     .getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
             if (lastLocation != null) {
                 long locationAge = lastLocation.getTime() - System.currentTimeMillis();
                 if (locationAge < MAX_LOCATION_AGE_MILLIS) {
-                    mLocation = lastLocation;
+                	m_udpDump.Location = lastLocation;
                     updateGeomagneticField();
                 }
             }
@@ -276,7 +274,7 @@ public class OrientationManager {
      * @return true if the user's location is known, otherwise false
      */
     public boolean hasLocation() {
-        return mLocation != null;
+        return m_udpDump.Location != null;
     }
 
     /**
@@ -286,7 +284,7 @@ public class OrientationManager {
      * @return the user's current heading, in degrees
      */
     public float getHeading() {
-        return mHeading;
+        return m_udpDump.Heading;
     }
 
     /**
@@ -296,7 +294,7 @@ public class OrientationManager {
      * @return the user's current pitch angle, in degrees
      */
     public float getPitch() {
-        return mPitch;
+        return m_udpDump.Pitch;
     }
 
     /**
@@ -305,43 +303,16 @@ public class OrientationManager {
      * @return the user's current location
      */
     public Location getLocation() {
-        return mLocation;
-    }
-
-    /**
-     * Notifies all listeners that the user's orientation has changed.
-     */
-    private void notifyOrientationChanged() {
-        for (OnChangedListener listener : mListeners) {
-            listener.onOrientationChanged(this);
-        }
-    }
-
-    /**
-     * Notifies all listeners that the user's location has changed.
-     */
-    private void notifyLocationChanged() {
-        for (OnChangedListener listener : mListeners) {
-            listener.onLocationChanged(this);
-        }
-    }
-
-    /**
-     * Notifies all listeners that the compass's accuracy has changed.
-     */
-    private void notifyAccuracyChanged() {
-        for (OnChangedListener listener : mListeners) {
-            listener.onAccuracyChanged(this);
-        }
+        return m_udpDump.Location;
     }
 
     /**
      * Updates the cached instance of the geomagnetic field after a location change.
      */
     private void updateGeomagneticField() {
-        mGeomagneticField = new GeomagneticField((float) mLocation.getLatitude(),
-                (float) mLocation.getLongitude(), (float) mLocation.getAltitude(),
-                mLocation.getTime());
+        mGeomagneticField = new GeomagneticField((float) m_udpDump.Location.getLatitude(),
+                (float) m_udpDump.Location.getLongitude(), (float) m_udpDump.Location.getAltitude(),
+                m_udpDump.Location.getTime());
     }
 
     /**
@@ -357,5 +328,9 @@ public class OrientationManager {
         } else {
             return heading;
         }
+    }
+    
+    private void update(){
+    	m_udpDump.send();
     }
 }
